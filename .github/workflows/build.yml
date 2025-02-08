@@ -49,7 +49,7 @@ jobs:
     - name: "Clean (x86_64) RootFS"
       run: |
         cd MiceWine-RootFS-Generator
-        sudo rm -rf /data/data/com.micewine.emu/files/usr workdir rootfs
+        sudo rm -rf /data/data/com.miHoYo.Yuanshen/files/usr workdir rootfs
 
     - name: "Start Building (aarch64)"
       run: |
