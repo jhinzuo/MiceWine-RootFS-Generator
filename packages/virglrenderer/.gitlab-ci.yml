@@ -1,0 +1,493 @@
+workflow:
+  rules:
+    # do not duplicate pipelines on merge pipelines
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS && $CI_PIPELINE_SOURCE == "push"
+      when: never
+    - when: always
+
+variables:
+  FDO_UPSTREAM_REPO: "virgl/virglrenderer"
+  MESA_TEMPLATES_COMMIT: &ci-templates-commit d5aa3941aa03c2f716595116354fb81eb8012acb
+  #
+  # IMPORTANT!
+  #
+  # Use the Pipeline ID corresponding to the Mesa Git rev provided below.
+  # If multiple pipeline runs are available, please choose the one having
+  # at least the 'debian-testing' job in 'Build-x86_64' stage completed.
+  #
+  # Pick a pipeline on https://gitlab.freedesktop.org/mesa/mesa/-/pipelines/
+  #
+  MESA_PIPELINE_ID: 1068128
+  MESA_PROJECT_PATH: mesa/mesa
+  STORAGE_HOST: s3.freedesktop.org
+  CI_REGISTRY_IMAGE: "registry.freedesktop.org/${MESA_PROJECT_PATH}"
+  # per-pipeline artifact storage on MinIO
+  PIPELINE_ARTIFACTS_BASE: ${STORAGE_HOST}/artifacts/${CI_PROJECT_PATH}/${CI_PIPELINE_ID}
+  # per-job artifact storage on MinIO
+  JOB_ARTIFACTS_BASE: ${PIPELINE_ARTIFACTS_BASE}/${CI_JOB_ID}
+  # reference images stored for traces
+  PIGLIT_REPLAY_REFERENCE_IMAGES_BASE: "${STORAGE_HOST}/mesa-tracie-results/${MESA_PROJECT_PATH}"
+
+
+include:
+  - project: 'freedesktop/ci-templates'
+    ref: 9f0eb526291fe74651fe1430cbd2397f4c0a819b
+    file:
+      - '/templates/ci-fairy.yml'
+  - project: 'freedesktop/ci-templates'
+    ref: *ci-templates-commit
+    file:
+      - '/templates/debian.yml'
+      - '/templates/fedora.yml'
+  - project: 'mesa/mesa'
+    # IMPORTANT: Use a recent Mesa Git revision
+    # The commit ref must be in sync with the pipeline picked above
+    # It can be found on the pipeline page below the commit message
+    ref: 2e46dd062470b07d1c297275ab5a7a2040e1ab80
+    file:
+      - '/.gitlab-ci/image-tags.yml'
+
+# YAML anchors for rule conditions
+# --------------------------------
+.rules-anchors:
+  rules:
+    # Scheduled pipeline
+    - if: &is-scheduled-pipeline '$CI_PIPELINE_SOURCE == "schedule"'
+      when: on_success
+    # Forked project branch / pre-merge pipeline not for Marge bot
+    - if: &is-forked-branch-or-pre-merge-not-for-marge '$CI_PROJECT_NAMESPACE != "virgl" || ($GITLAB_USER_LOGIN != "marge-bot" && $CI_PIPELINE_SOURCE == "merge_request_event")'
+      when: manual
+    # Pipeline runs for the main branch of the upstream virglrenderer project
+    - if: &is-virglrenderer-main '$CI_PROJECT_NAMESPACE == "virgl" && $CI_COMMIT_REF_NAME == $CI_DEFAULT_BRANCH && $CI_COMMIT_BRANCH'
+      when: always
+    # Post-merge pipeline
+    - if: &is-post-merge '$CI_PROJECT_NAMESPACE == "virgl" && $CI_COMMIT_BRANCH'
+      when: on_success
+    # Pre-merge pipeline for Marge Bot
+    - if: &is-pre-merge-for-marge '$GITLAB_USER_LOGIN == "marge-bot" && $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+
+stages:
+  - build
+  - sanity test
+  - test
+
+.set-image:
+  variables:
+    MESA_IMAGE: "$CI_REGISTRY_IMAGE/${MESA_IMAGE_PATH}:${MESA_IMAGE_TAG}--${MESA_TEMPLATES_COMMIT}"
+  image: "$MESA_IMAGE"
+
+.set-image-base-tag:
+  extends:
+    - .set-image
+  variables:
+    MESA_IMAGE: "$CI_REGISTRY_IMAGE/${MESA_IMAGE_PATH}:${MESA_IMAGE_TAG}--${MESA_BASE_TAG}--${MESA_TEMPLATES_COMMIT}"
+
+.use-build-image:
+  extends:
+    - .set-image-base-tag
+  variables:
+    MESA_IMAGE_PATH: ${DEBIAN_X86_64_BUILD_IMAGE_PATH}
+    MESA_IMAGE_TAG: ${DEBIAN_BUILD_TAG}
+    MESA_BASE_TAG: ${DEBIAN_BASE_TAG}
+
+debian/x86_64_build:
+  stage: build
+  extends:
+    - .use-build-image
+  variables:
+    S3_ARTIFACT_NAME: virgl-x86_64
+    EXTRA_OPTION: >
+      -D werror=true
+  script:
+    - .gitlab-ci/meson/build.sh
+  artifacts:
+    name: "virgl_${CI_JOB_NAME}"
+    when: always
+    paths:
+      - install/
+      - results/
+  rules:
+    - if: *is-scheduled-pipeline
+      when: on_success
+    - if: *is-post-merge
+      when: never
+    - if: *is-forked-branch-or-pre-merge-not-for-marge
+      when: manual
+    - if: *is-pre-merge-for-marge
+      when: on_success
+    - when: never
+
+debian/x86_64_build_msm:
+  stage: build
+  extends:
+    - .use-build-image
+  variables:
+    MINIO_ARTIFACT_NAME: virgl-amd64
+    EXTRA_OPTION: >
+      -D drm=enabled -D drm-msm-experimental=true
+  script:
+    - .gitlab-ci/meson/build.sh
+  artifacts:
+    name: "virgl_${CI_JOB_NAME}"
+    when: always
+    paths:
+      - install/
+      - results/
+  rules:
+    - changes:
+      - src/drm/**/*
+      when: on_success
+    - if: *is-scheduled-pipeline
+      when: on_success
+    - if: *is-post-merge
+      when: never
+    - if: *is-forked-branch-or-pre-merge-not-for-marge
+      when: manual
+    - if: *is-pre-merge-for-marge
+      when: on_success
+    - when: never
+
+debian/x86_64_build_minigbm:
+  stage: build
+  extends:
+    - .use-build-image
+  variables:
+    MINIO_ARTIFACT_NAME: virgl-amd64
+    EXTRA_OPTION: >
+      -D minigbm_allocation=true
+  script:
+    - .gitlab-ci/meson/build.sh
+  artifacts:
+    name: "virgl_${CI_JOB_NAME}"
+    when: always
+    paths:
+      - install/
+      - results/
+  rules:
+    - changes:
+      - src/vrend_winsys_gbm.*
+      - src/vrend_winsys_egl.c
+      - src/vrend_renderer.c
+      when: on_success
+    - if: *is-scheduled-pipeline
+      when: on_success
+    - if: *is-post-merge
+      when: never
+    - if: *is-forked-branch-or-pre-merge-not-for-marge
+      when: manual
+    - if: *is-pre-merge-for-marge
+      when: on_success
+    - when: never
+
+debian/x86_64_build_tracing:
+  stage: build
+  extends:
+    - .use-build-image
+  variables:
+    MINIO_ARTIFACT_NAME: virgl-amd64
+    WRAP_DEBUG: default
+    DEBIAN_FRONTEND: noninteractive
+  script:
+    - apt-get update && apt-get install -y libsysprof-4-dev
+    - TRACING_BACKEND=percetto .gitlab-ci/meson/build.sh
+    - TRACING_BACKEND=perfetto .gitlab-ci/meson/build.sh
+    - TRACING_BACKEND=sysprof .gitlab-ci/meson/build.sh
+    - TRACING_BACKEND=stderr .gitlab-ci/meson/build.sh
+  artifacts:
+    name: "virgl_${CI_JOB_NAME}"
+    when: always
+    paths:
+      - install/
+      - results/
+  rules:
+    - changes:
+      - src/virgl_util.h
+      - src/virgl_util.c
+      when: on_success
+    - if: *is-scheduled-pipeline
+      when: on_success
+    - if: *is-post-merge
+      when: never
+    - if: *is-forked-branch-or-pre-merge-not-for-marge
+      when: manual
+    - if: *is-pre-merge-for-marge
+      when: on_success
+    - when: never
+
+# FIXME: Mesa's `debian/x86_build-mingw` job is turned off until gets
+#  fixed on Debian 12. Disable here as a side effect.
+.debian/mingw32-x86_64:
+  stage: build
+  extends:
+    - .use-build-image
+  variables:
+    EXTRA_OPTION: >
+      --cross-file=.gitlab-ci/x86_64-w64-mingw32 -Dplatforms= -Dtests=false -Drender-server=false -Dvenus=false
+  script:
+    - git clone --depth 1 https://github.com/anholt/libepoxy.git && pushd libepoxy && meson setup _build --cross-file=../.gitlab-ci/x86_64-w64-mingw32 -Dprefix=/usr/x86_64-w64-mingw32 && meson install -C _build && popd
+    - .gitlab-ci/meson/build.sh
+  artifacts:
+    name: "virgl_${CI_JOB_NAME}"
+    when: always
+    paths:
+      - install/
+      - results/
+  rules:
+    - if: *is-scheduled-pipeline
+      when: on_success
+    - if: *is-post-merge
+      when: never
+    - if: *is-forked-branch-or-pre-merge-not-for-marge
+      when: manual
+    - if: *is-pre-merge-for-marge
+      when: on_success
+    - when: never
+
+#
+# Sanity test jobs
+#
+
+.make_check_base:
+  stage: sanity test
+  extends: debian/x86_64_build
+  needs: []
+  artifacts:
+    when: always
+    paths:
+      - results/
+
+mesa check meson:
+  extends: .make_check_base
+  variables:
+    TEST_SUITE: make-check-meson
+
+make check clang-fuzzer:
+  extends: .make_check_base
+  variables:
+    TEST_SUITE: make-check-clang-fuzzer
+    LLVM_VERSION: 15
+    CC: clang-${LLVM_VERSION}
+    EXTRA_OPTION: "-D fuzzer=true"
+
+make check trace-stderr:
+  extends: .make_check_base
+  variables:
+    TEST_SUITE: make-check-trace-stderr
+    EXTRA_OPTION: "-D tracing=stderr"
+
+make check venus:
+  extends: .make_check_base
+  variables:
+    TEST_SUITE: make-check-venus
+
+#
+# Piglit & dEQP test jobs
+#
+
+.use-gl-test-image:
+  stage: test
+  extends:
+    - .set-image-base-tag
+  before_script:
+    - echo -n "${CI_JOB_JWT}" > "${CI_JOB_JWT_FILE}"
+    - unset CI_JOB_JWT
+    - export CI_JOB_NAME_SANITIZED="$(echo $CI_JOB_NAME | tr ' /' '--')"
+  variables:
+    CI_JOB_JWT_FILE: /minio_jwt
+    MESA_IMAGE_PATH: ${DEBIAN_X86_64_TEST_IMAGE_GL_PATH}
+    MESA_IMAGE_TAG: ${DEBIAN_X86_64_TEST_GL_TAG}
+    MESA_BASE_TAG: "${DEBIAN_BASE_TAG}--${KERNEL_TAG}"
+  script:
+    - export DEQP_RESULTS_DIR="results/${CI_JOB_NAME_SANITIZED}"
+    - export PIGLIT_RESULTS_DIR="results/${CI_JOB_NAME_SANITIZED}"
+    - .gitlab-ci/container/debian/x86_64_test.sh
+  artifacts:
+    name: "virgl-result"
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/junit.xml
+  needs:
+    - job: debian/x86_64_build
+      artifacts: true
+  rules:
+    - if: *is-post-merge
+      when: never
+    - when: on_success
+
+.use-vk-test-image:
+  stage: test
+  extends:
+    - .set-image-base-tag
+  before_script:
+    - echo -n "${CI_JOB_JWT}" > "${CI_JOB_JWT_FILE}"
+    - unset CI_JOB_JWT
+    - export CI_JOB_NAME_SANITIZED="$(echo $CI_JOB_NAME | tr ' /' '--')"
+  variables:
+    CI_JOB_JWT_FILE: /minio_jwt
+    MESA_IMAGE_PATH: ${DEBIAN_X86_64_TEST_IMAGE_VK_PATH}
+    MESA_IMAGE_TAG: ${DEBIAN_X86_64_TEST_VK_TAG}
+    MESA_BASE_TAG: "${DEBIAN_BASE_TAG}--${KERNEL_TAG}"
+  script:
+    - export DEQP_RESULTS_DIR="results/${CI_JOB_NAME_SANITIZED}"
+    - export PIGLIT_RESULTS_DIR="results/${CI_JOB_NAME_SANITIZED}"
+    - .gitlab-ci/container/debian/x86_64_test.sh
+  artifacts:
+    name: "venus-result"
+    when: always
+    paths:
+      - results/
+    reports:
+      junit: results/junit.xml
+  needs:
+    - job: debian/x86_64_build
+      artifacts: true
+  rules:
+    - if: *is-post-merge
+      when: never
+    - when: on_success
+
+.gl-host-test:
+  extends:
+    - .use-gl-test-image
+  variables:
+    GALLIUM_DRIVER: virpipe
+    GALLIVM_PERF: nopt
+    LP_NUM_THREADS: 1
+
+.gl-virt-test:
+  extends:
+    - .use-gl-test-image
+  variables:
+    GALLIUM_DRIVER: virgl
+    CROSVM_GALLIUM_DRIVER: llvmpipe
+    GALLIVM_PERF: "nopt,no_quad_lod"
+
+.deqp-host:
+  extends:
+    - .gl-host-test
+
+.piglit-host:
+  extends:
+    - .gl-host-test
+  variables: &piglit-host-variables
+    PIGLIT_PLATFORM: surfaceless_egl
+    PIGLIT_NO_WINDOW: 1
+    PIGLIT_PROFILES: gpu
+
+.deqp-virt:
+  extends:
+    - .gl-virt-test
+  variables:
+    # There will be FDO_CI_CONCURRENT Crosvm processes, so each should use a single thread
+    LP_NUM_THREADS: 1
+
+.piglit-virt:
+  extends:
+    - .gl-virt-test
+  variables:
+    <<: *piglit-host-variables
+    # Use all threads for rendering and only run one job at a time
+    LP_NUM_THREADS: ${FDO_CI_CONCURRENT}
+    FORCE_FDO_CI_CONCURRENT: 1
+
+# Host runners (virpipe/vtest)
+
+deqp-gl-host:
+  extends:
+    - .deqp-host
+  variables:
+    DEQP_SUITE: virgl-gl
+    GPU_VERSION: virgl-gl
+
+deqp-gles-host:
+  extends:
+    - .deqp-host
+  variables:
+    VIRGL_HOST_API: GLES
+    DEQP_SUITE: virgl-gles
+    GPU_VERSION: virgl-gles
+
+piglit-gl-host:
+  extends:
+    - .piglit-host
+  variables:
+    GPU_VERSION: virgl-gl
+    DEQP_FRACTION: 4
+
+piglit-gles-host:
+  extends:
+    - .piglit-host
+  variables:
+    VIRGL_HOST_API: GLES
+    GPU_VERSION: virgl-gles
+    DEQP_FRACTION: 4
+
+# Virt runners (virgl/crosvm)
+
+deqp-gl-virt:
+  extends:
+    - .deqp-virt
+  variables:
+    DEQP_SUITE: virgl-gl
+    GPU_VERSION: virgl-gl
+    CROSVM_GPU_ARGS: &deqp-gl-crosvm-gpu-args "gles=false,backend=virglrenderer,egl=true,surfaceless=true,width=1024,height=768"
+
+deqp-gles-virt:
+  extends:
+    - .deqp-virt
+  variables:
+    VIRGL_HOST_API: GLES
+    DEQP_SUITE: virgl-gles
+    GPU_VERSION: virgl-gles
+    CROSVM_GPU_ARGS: &deqp-gles-crosvm-gpu-args "gles=true,backend=virglrenderer,egl=true,surfaceless=true,width=1024,height=768"
+
+piglit-gl-virt:
+  extends:
+    - .piglit-virt
+  parallel: 3
+  variables:
+    GPU_VERSION: virgl-gl
+    CROSVM_GPU_ARGS: *deqp-gl-crosvm-gpu-args
+
+piglit-gles-virt:
+  extends:
+    - .piglit-virt
+  parallel: 3
+  variables:
+    VIRGL_HOST_API: GLES
+    GPU_VERSION: virgl-gles
+    CROSVM_GPU_ARGS: *deqp-gles-crosvm-gpu-args
+
+virgl-traces:
+  extends:
+    - .piglit-virt
+  variables:
+    GPU_VERSION: virgl-gl
+    CROSVM_GPU_ARGS: *deqp-gl-crosvm-gpu-args
+    EGL_PLATFORM: "surfaceless"
+    PIGLIT_TRACES_FILE: "traces-virgl.yml"
+    PIGLIT_REPLAY_DEVICE_NAME: "gl-virgl"
+    PIGLIT_RESULTS: "virgl-replay"
+
+.venus-lavapipe-test:
+  extends:
+    - .use-vk-test-image
+  variables:
+    VK_DRIVER: virtio
+    CROSVM_GALLIUM_DRIVER: "llvmpipe"
+    CROSVM_VK_DRIVER: "lvp"
+
+venus-lavapipe:
+  extends:
+    - .venus-lavapipe-test
+  variables:
+    DEQP_FRACTION: 35
+    DEQP_SUITE: venus
+    GPU_VERSION: venus
+    LP_NUM_THREADS: 2
+    CROSVM_MEMORY: 12288
+    CROSVM_CPU: $FDO_CI_CONCURRENT
+    CROSVM_GPU_ARGS: "vulkan=true,gles=false,backend=virglrenderer,egl=true,surfaceless=true"
