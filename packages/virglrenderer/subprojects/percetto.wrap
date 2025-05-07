@@ -1,9 +1,0 @@
-[wrap-git]
-directory=percetto
-
-url=https://github.com/olvaffe/percetto.git
-revision=f7ed7120ee7480b0890a4ee819c3828c5b036f47
-depth=1
-
-[provide]
-dependency_names=percetto
