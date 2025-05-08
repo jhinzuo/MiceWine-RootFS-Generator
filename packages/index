@@ -80,3 +80,4 @@ libandroid-wordexp
 mangohud
 mesa-vulkan-virtio
 virglrenderer 
+libcutils
