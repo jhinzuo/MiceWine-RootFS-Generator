@@ -1,7 +1,7 @@
 PKG_VER=1.0.0
 PKG_CATEGORY=Utils
 PKG_PRETTY_NAME=libcutils
-SRC_URL=https://android.googlesource.com/platform/system/core/+archive/refs/heads/android-10.0.0_r30/libcutils.tar.gz
+SRC_URL=https://android.googlesource.com/platform/system/core/+archive/refs/tags/android-15.0.0_r36/libcutils.tar.gz
 BUILD_IN_SRC=1
 
 # Architecture-specific options
@@ -15,13 +15,13 @@ fi
 
 # Create a custom Makefile since libcutils doesn't come with one
 RUN_POST_APPLY_PATCH='
-# Some source files need to be excluded on specific architectures
+# Exclude architecture-specific source files
 if [ "$ARCH" == "x86_64" ]; then
-    # Exclude ARM-specific files
-    EXCLUSIONS="*.arm.c"
+    EXCLUSIONS=".*arm.*\\.c"
 elif [ "$ARCH" == "aarch64" ]; then
-    # Exclude x86-specific files
-    EXCLUSIONS="*.x86.c"
+    EXCLUSIONS=".*x86.*\\.c"
+else
+    EXCLUSIONS=""
 fi
 
 cat > Makefile << EOF
@@ -29,22 +29,23 @@ CC ?= $CC
 AR ?= ar
 RANLIB ?= ranlib
 CFLAGS += $CFLAGS
+LDFLAGS += $LDFLAGS
 
-# Get all C source files excluding architecture-specific ones we don't want
-SRCS = $(ls *.c | grep -v "$EXCLUSIONS" 2>/dev/null || echo "*.c")
-OBJS = $(echo \$(SRCS) | sed "s/\.c/\.o/g")
+# Get all C source files excluding architecture-specific ones
+SRCS = \$(shell ls *.c 2>/dev/null | grep -Ev "$EXCLUSIONS")
+OBJS = \$(SRCS:.c=.o)
 
 all: libcutils.a libcutils.so
 
 %.o: %.c
-	\$(CC) \$(CFLAGS) -c $< -o $@
+	\$(CC) \$(CFLAGS) -c \$< -o \$@
 
 libcutils.a: \$(OBJS)
-	\$(AR) rcs $@ \$(OBJS)
-	\$(RANLIB) $@
+	\$(AR) rcs \$@ \$(OBJS)
+	\$(RANLIB) \$@
 
 libcutils.so: \$(OBJS)
-	\$(CC) -shared \$(LDFLAGS) -o $@ \$(OBJS)
+	\$(CC) -shared \$(LDFLAGS) -o \$@ \$(OBJS)
 
 install:
 	mkdir -p \$(DESTDIR)$PREFIX/lib \$(DESTDIR)$PREFIX/include/cutils
@@ -55,7 +56,7 @@ clean:
 	rm -f *.o libcutils.a libcutils.so
 EOF
 
-# Create basic pkg-config file
+# Create a pkg-config file for libcutils
 mkdir -p \$(DESTDIR)$PREFIX/lib/pkgconfig
 cat > \$(DESTDIR)$PREFIX/lib/pkgconfig/libcutils.pc << EOF
 prefix=$PREFIX
