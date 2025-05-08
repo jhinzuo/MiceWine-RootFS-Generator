@@ -13,17 +13,30 @@ elif [ "$ARCH" == "x86_64" ]; then
     LDFLAGS="-L$PREFIX/lib"
 fi
 
-# Create a custom Makefile since libcutils doesn't come with one
-RUN_POST_APPLY_PATCH='
-# Exclude architecture-specific source files
-if [ "$ARCH" == "x86_64" ]; then
-    EXCLUSIONS=".*arm.*\\.c"
-elif [ "$ARCH" == "aarch64" ]; then
-    EXCLUSIONS=".*x86.*\\.c"
-else
-    EXCLUSIONS=""
+# Download and extract libcutils
+echo "Downloading libcutils..."
+curl -o libcutils.tar.gz "$SRC_URL" || { echo "Failed to download libcutils"; exit 1; }
+
+echo "Extracting libcutils..."
+mkdir -p libcutils
+tar -xzf libcutils.tar.gz -C libcutils || { echo "Failed to extract libcutils"; exit 1; }
+
+# Verify libcutils directory exists
+if [ ! -d "libcutils" ]; then
+    echo "libcutils directory not found!"
+    exit 1
 fi
 
+# Change into the libcutils directory
+cd libcutils
+
+# Verify header files exist
+if ! ls *.h >/dev/null 2>&1; then
+    echo "Header files are missing in libcutils"
+    exit 1
+fi
+
+# Create a custom Makefile since libcutils doesn't come with one
 cat > Makefile << EOF
 CC ?= $CC
 AR ?= ar
@@ -31,8 +44,8 @@ RANLIB ?= ranlib
 CFLAGS += $CFLAGS
 LDFLAGS += $LDFLAGS
 
-# Get all C source files excluding architecture-specific ones
-SRCS = \$(shell ls *.c 2>/dev/null | grep -Ev "$EXCLUSIONS")
+# Get all C source files
+SRCS = \$(shell ls *.c 2>/dev/null)
 OBJS = \$(SRCS:.c=.o)
 
 all: libcutils.a libcutils.so
@@ -70,4 +83,3 @@ Version: $PKG_VER
 Libs: -L\${libdir} -lcutils
 Cflags: -I\${includedir}/cutils
 EOF
-'
