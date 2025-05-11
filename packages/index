@@ -30,6 +30,7 @@ libvorbis
 libiconv
 libunistring
 libxml2
+libepoxy
 fakeintl
 pulseaudio
 libdrm
