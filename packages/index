@@ -79,4 +79,6 @@ wine
 libandroid-wordexp
 mangohud
 mesa-vulkan-virtio
+libepoxy
+virglrenderer 
  
