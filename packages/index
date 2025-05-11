@@ -30,7 +30,6 @@ libvorbis
 libiconv
 libunistring
 libxml2
-libepoxy
 fakeintl
 pulseaudio
 libdrm
@@ -80,4 +79,4 @@ wine
 libandroid-wordexp
 mangohud
 mesa-vulkan-virtio
-virglrenderer 
+ 
