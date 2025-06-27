@@ -1,4 +1,4 @@
-PKG_VER=25.0.3
+PKG_VER=25.1.0
 PKG_CATEGORY="VulkanDriver"
 PKG_PRETTY_NAME="Mesa Turnip Driver"
 PKG_OPTIONAL=1
