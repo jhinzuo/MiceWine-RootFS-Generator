@@ -5,7 +5,7 @@ VK_DRIVER_LIB="libvulkan_wrapper.so"
 
 BLACKLIST_ARCH=x86_64
 
-GIT_URL=https://github.com/xMeM/mesa
-GIT_COMMIT=e65c7eb6ee2f9903c3256f2677beb1d98464103f
+GIT_URL=https://github.com/leegao/bionic-vulkan-wrapper
+GIT_COMMIT=34576e9995ec6a27038d960265fb4447ee810445
 LDFLAGS="-L$PREFIX/lib -landroid-shmem -ladrenotools -llinkernsbypass"
 MESON_ARGS="-Dgallium-drivers= -Dvulkan-drivers=wrapper -Dglvnd=disabled -Dplatforms=x11 -Dxmlconfig=disabled -Dllvm=disabled -Dopengl=false -Degl=disabled -Dzstd=enabled"
