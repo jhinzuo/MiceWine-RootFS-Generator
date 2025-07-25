@@ -1,4 +1,4 @@
-PKG_VER=24.2.5-v0.0.4r6
+PKG_VER=24.2.5-0.0.4r6
 PKG_CATEGORY="VulkanDriver"
 PKG_PRETTY_NAME="Mesa Android Wrapper By LeeGao (Rev 9)"
 PKG_OPTIONAL=1
